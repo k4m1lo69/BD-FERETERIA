@@ -1,5 +1,5 @@
 -- ============================================================
--- EV1 BDY1103 - Ferreteria ViSol (v2)
+-- EV1 BDY1103 - Ferreteria ViSol 
 -- Punto 3: RECORD y VARRAY (adaptado a cabecera/detalle)
 -- ============================================================
 
