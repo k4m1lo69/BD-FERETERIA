@@ -1,93 +1,73 @@
--- ============================================================
--- EV1 BDY1103 - Ferreteria ViSol (v2)
--- Punto 4: Cursores explicitos (simples, con parametros, loops anidados)
--- ============================================================
-
 SET SERVEROUTPUT ON;
 
--- ---------- 4.1 Cursor explicito simple ----------
+Cursor simple stock bajo · SQL
+ 
 DECLARE
-    CURSOR c_clientes IS
-        SELECT id, nombre, email FROM clientes;
-    v_cliente c_clientes%ROWTYPE;
+   -- Cursor simple: no recibe parámetros, siempre trae los mismos productos
+   -- (los que están en o bajo su cantidad mínima de reposición)
+   CURSOR c_stock_bajo IS
+      SELECT p.codigo, p.nombre, i.cantidad, i.cantidad_minima
+      FROM productos p
+      JOIN inventario i ON i.id_producto = p.id_producto
+      WHERE i.cantidad <= i.cantidad_minima;
+ 
 BEGIN
-    OPEN c_clientes;
-    LOOP
-        FETCH c_clientes INTO v_cliente;
-        EXIT WHEN c_clientes%NOTFOUND;
-        DBMS_OUTPUT.PUT_LINE('Cliente #' || v_cliente.id || ': ' || v_cliente.nombre);
-    END LOOP;
-    CLOSE c_clientes;
+   DBMS_OUTPUT.PUT_LINE('REPORTE DE PRODUCTOS CON STOCK BAJO');
+   DBMS_OUTPUT.PUT_LINE('=====================================');
+ 
+   FOR r_prod IN c_stock_bajo LOOP
+      DBMS_OUTPUT.PUT_LINE(r_prod.codigo || ' - ' || r_prod.nombre
+         || ' | Stock actual: ' || r_prod.cantidad
+         || ' | Mínimo: ' || r_prod.cantidad_minima);
+   END LOOP;
+ 
 END;
 /
 
--- ---------- 4.2 Cursor explicito con parametro ----------
--- Recorre las lineas de detalle de UN pedido puntual
+
+
+    
+
 DECLARE
-    CURSOR c_detalle_pedido(p_pedido_id NUMBER) IS
-        SELECT dp.producto_id, pr.nombre AS producto_nombre, dp.cantidad, dp.precio_unitario
-        FROM detalle_pedidos dp
-        JOIN productos pr ON pr.id = dp.producto_id
-        WHERE dp.pedido_id = p_pedido_id;
-    v_linea c_detalle_pedido%ROWTYPE;
+   -- Cursor externo: recibe el id del cliente como parámetro
+   CURSOR c_ventas_cliente (p_id_cliente NUMBER) IS
+      SELECT id_compra_cliente, fecha_venta
+      FROM venta_cliente
+      WHERE id_cliente = p_id_cliente;
+
+   -- Cursor interno: recibe el id de la venta que entrega el cursor externo
+   CURSOR c_detalle_venta (p_id_venta NUMBER) IS
+      SELECT dv.cantidad, dv.precio_unitario, dv.descuento, p.nombre
+      FROM detalle_ventas dv
+      JOIN productos p ON p.id_producto = dv.id_producto
+      WHERE dv.id_compra_cliente = p_id_venta;
+
+   v_total_venta   NUMBER;
+   v_total_cliente NUMBER := 0;
+   v_id_cliente    NUMBER := 1;  -- Ejemplo: cliente 1
+
 BEGIN
-    OPEN c_detalle_pedido(4); -- pedido multiproducto
-    LOOP
-        FETCH c_detalle_pedido INTO v_linea;
-        EXIT WHEN c_detalle_pedido%NOTFOUND;
-        DBMS_OUTPUT.PUT_LINE(v_linea.producto_nombre || ' x' || v_linea.cantidad ||
-                              ' @ ' || v_linea.precio_unitario);
-    END LOOP;
-    CLOSE c_detalle_pedido;
-END;
-/
+   DBMS_OUTPUT.PUT_LINE('HISTORIAL DE COMPRAS - CLIENTE ' || v_id_cliente);
+   DBMS_OUTPUT.PUT_LINE('=====================================');
 
--- ---------- 4.3 Cursores complejos con loops anidados ----------
--- Cliente -> sus pedidos -> el detalle de cada pedido -> sus pagos
-DECLARE
-    CURSOR c_clientes IS
-        SELECT id, nombre FROM clientes;
+   -- Loop externo: recorre cada venta del cliente
+   FOR r_venta IN c_ventas_cliente(v_id_cliente) LOOP
+      v_total_venta := 0;
+      DBMS_OUTPUT.PUT_LINE('Venta N° ' || r_venta.id_compra_cliente || ' (' || r_venta.fecha_venta || ')');
 
-    CURSOR c_pedidos_cliente(p_cliente_id NUMBER) IS
-        SELECT id, estado, fecha
-        FROM pedidos
-        WHERE cliente_id = p_cliente_id;
+      -- Loop interno: recorre el detalle de esa venta
+      FOR r_det IN c_detalle_venta(r_venta.id_compra_cliente) LOOP
+         v_total_venta := v_total_venta
+            + (r_det.cantidad * r_det.precio_unitario * (1 - r_det.descuento / 100));
+         DBMS_OUTPUT.PUT_LINE('   - ' || r_det.nombre || ' x' || r_det.cantidad);
+      END LOOP;
 
-    CURSOR c_detalle_pedido(p_pedido_id NUMBER) IS
-        SELECT pr.nombre AS producto_nombre, dp.cantidad, dp.precio_unitario
-        FROM detalle_pedidos dp
-        JOIN productos pr ON pr.id = dp.producto_id
-        WHERE dp.pedido_id = p_pedido_id;
+      DBMS_OUTPUT.PUT_LINE('   Subtotal venta: $' || v_total_venta);
+      v_total_cliente := v_total_cliente + v_total_venta;
+   END LOOP;
 
-    CURSOR c_pagos_pedido(p_pedido_id NUMBER) IS
-        SELECT monto, metodo_pago, estado
-        FROM pagos
-        WHERE pedido_id = p_pedido_id;
+   DBMS_OUTPUT.PUT_LINE('=====================================');
+   DBMS_OUTPUT.PUT_LINE('Total comprado por el cliente: $' || v_total_cliente);
 
-    v_pago_encontrado BOOLEAN;
-BEGIN
-    FOR v_cliente IN c_clientes LOOP
-        DBMS_OUTPUT.PUT_LINE('=== Cliente: ' || v_cliente.nombre || ' ===');
-
-        FOR v_pedido IN c_pedidos_cliente(v_cliente.id) LOOP
-            DBMS_OUTPUT.PUT_LINE('  Pedido #' || v_pedido.id || ' - Estado: ' || v_pedido.estado);
-
-            FOR v_linea IN c_detalle_pedido(v_pedido.id) LOOP
-                DBMS_OUTPUT.PUT_LINE('     - ' || v_linea.producto_nombre || ' x' ||
-                                      v_linea.cantidad || ' @ ' || v_linea.precio_unitario);
-            END LOOP;
-
-            v_pago_encontrado := FALSE;
-            FOR v_pago IN c_pagos_pedido(v_pedido.id) LOOP
-                DBMS_OUTPUT.PUT_LINE('     Pago: ' || v_pago.monto || ' via ' || v_pago.metodo_pago ||
-                                      ' (' || v_pago.estado || ')');
-                v_pago_encontrado := TRUE;
-            END LOOP;
-
-            IF NOT v_pago_encontrado THEN
-                DBMS_OUTPUT.PUT_LINE('     Sin pago registrado aun');
-            END IF;
-        END LOOP;
-    END LOOP;
 END;
 /
